@@ -4,7 +4,7 @@ use 5.008008;
 use strict;
 use warnings;
 
-our $VERSION = '0.03';
+our $VERSION = '0.04';
 $VERSION = eval $VERSION;  # see L<perlmodstyle>
 
 =head1 NAME
@@ -120,7 +120,7 @@ foreach(20 ... 39){
     };
 }
 
-foreach(20 ... 39){
+foreach(40 ... 39){
    $fqdn_codes->{'127.0.1.'.$_} = {
         assessment  => 'malware',
     };
@@ -134,11 +134,13 @@ sub _return_rr {
     # little more thread friendly
     require Net::DNS::Resolver;
     my $r = Net::DNS::Resolver->new(recursive => 0);
-
+    
     if($timeout){
-      $r->udp_timeout($timeout);
-      $r->tcp_timeout($timeout);
+        $r->udp_timeout($timeout);
+        $r->tcp_timeout($timeout);
     }
+    
+
     my $pkt = $r->send($lookup);
     return unless($pkt);
     my @rdata = $pkt->answer();
@@ -158,17 +160,27 @@ sub _return_rr {
 
 sub check_fqdn {
     my $addr = shift;
-    my $timeout = shift;
+    my $timeout = shift || 10;
 
     my $lookup = $addr.'.dbl.spamhaus.org';
     my $rdata = _return_rr($lookup,undef,$timeout);
-
+    return unless($rdata);
+    
     my @array;
     foreach (@$rdata){
-        next unless($_->{'type'} eq 'A');
-        my $code = $fqdn_codes->{$_->{'address'}};
+        next unless($_->address());
+        next unless($_->type() eq 'A');
+        my $code = $fqdn_codes->{$_->address()};
+        unless($code){
+            warn 'unknown return code: '.$_->address().' library needs updating, contact module author';
+            $code->{'description'} = 'unknown' unless($code->{'description'});
+            $code->{'assessment'} = 'unknown' unless($code->{'assessment'});
+        }
 
-        return if($code->{'description'} =~ /BANNED/);
+        if($code->{'description'} =~ /BANNED/){
+            warn 'BANNED received from spamhaus, you should contact them and work it out';
+            return;
+        }
         push(@array,{
             id          => 'http://www.spamhaus.org/query/dbl?domain='.$addr,
             assessment  => $code->{'assessment'},
@@ -194,21 +206,23 @@ sub check_ip {
     $lookup .= '.zen.spamhaus.org';
 
     my $rdata = _return_rr($lookup,undef,$timeout);
+    return unless($rdata);
     
-    my @array;
+    my $array;
     foreach (@$rdata){
-        next unless($_->{'type'} eq 'A');
-        my $code = $ip_codes->{$_->{'address'}};
+        next unless($_->type() eq 'A');
+        my $code = $ip_codes->{$_->address()};
 
+        # these aren't really malicious assessments, skip them
         # see http://www.spamhaus.org/faq/answers.lasso?section=Spamhaus%20PBL#183
-        next if($_->{'address'} =~ /\.(10|11)$/);
-        push(@array,{
+        next if($_->address() =~ /\.(10|11)$/);
+        push(@$array,{
             assessment  => $code->{'assessment'},
             description => $code->{'description'},
             id          => 'http://www.spamhaus.org/query/bl?ip='.$addr,
         });
     }
-    return(\@array);
+    return($array);
 } 
     
 1;
