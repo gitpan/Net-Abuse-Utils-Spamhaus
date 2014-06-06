@@ -14,4 +14,3 @@ META.yml
 README
 rebuild.sh
 t/Net-Abuse-Utils-Spamhaus.t
-test.pl
